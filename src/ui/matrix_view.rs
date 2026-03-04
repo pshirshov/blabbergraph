@@ -9,10 +9,15 @@ use crate::model::state::AppState;
 use crate::pw::graph::PortInfo;
 use crate::pw::message::{PortDirection, PwCommand};
 
+struct CellEntry {
+    button: gtk::ToggleButton,
+    handler_id: glib::SignalHandlerId,
+}
+
 pub struct MatrixView {
     pub container: gtk::Box,
     grid: gtk::Grid,
-    cells: HashMap<(u32, u32), gtk::ToggleButton>,
+    cells: HashMap<(u32, u32), CellEntry>,
 }
 
 impl MatrixView {
@@ -88,7 +93,7 @@ impl MatrixView {
             return;
         }
 
-        // Column headers (input ports) - use vertical text via CSS
+        // Column headers (input ports)
         for (col, in_port) in input_ports.iter().enumerate() {
             let node_name = state_borrow
                 .graph
@@ -141,8 +146,9 @@ impl MatrixView {
                     .graph
                     .find_link(out_port.id, in_port.id)
                     .is_some();
-                btn.set_active(link_exists);
 
+                // Set initial state BEFORE connecting signal
+                btn.set_active(link_exists);
                 if link_exists {
                     btn.add_css_class("suggested-action");
                 }
@@ -151,7 +157,7 @@ impl MatrixView {
                 let state_ref = state.clone();
                 let out_id = out_port.id;
                 let in_id = in_port.id;
-                btn.connect_toggled(move |btn| {
+                let handler_id = btn.connect_toggled(move |btn| {
                     let active = btn.is_active();
                     if active {
                         btn.add_css_class("suggested-action");
@@ -170,17 +176,22 @@ impl MatrixView {
 
                 self.grid
                     .attach(&btn, (col + 1) as i32, (row + 1) as i32, 1, 1);
-                self.cells.insert((out_port.id, in_port.id), btn);
+                self.cells.insert(
+                    (out_port.id, in_port.id),
+                    CellEntry { button: btn, handler_id },
+                );
             }
         }
     }
 
     /// Returns true if the cell existed and was updated.
     pub fn update_link_added(&self, output_port_id: u32, input_port_id: u32) -> bool {
-        if let Some(btn) = self.cells.get(&(output_port_id, input_port_id)) {
-            if !btn.is_active() {
-                btn.set_active(true);
-                btn.add_css_class("suggested-action");
+        if let Some(cell) = self.cells.get(&(output_port_id, input_port_id)) {
+            if !cell.button.is_active() {
+                cell.button.block_signal(&cell.handler_id);
+                cell.button.set_active(true);
+                cell.button.unblock_signal(&cell.handler_id);
+                cell.button.add_css_class("suggested-action");
             }
             true
         } else {
@@ -195,10 +206,12 @@ impl MatrixView {
         output_port_id: u32,
         input_port_id: u32,
     ) -> bool {
-        if let Some(btn) = self.cells.get(&(output_port_id, input_port_id)) {
-            if btn.is_active() {
-                btn.set_active(false);
-                btn.remove_css_class("suggested-action");
+        if let Some(cell) = self.cells.get(&(output_port_id, input_port_id)) {
+            if cell.button.is_active() {
+                cell.button.block_signal(&cell.handler_id);
+                cell.button.set_active(false);
+                cell.button.unblock_signal(&cell.handler_id);
+                cell.button.remove_css_class("suggested-action");
             }
             true
         } else {
