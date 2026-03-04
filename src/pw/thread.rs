@@ -90,6 +90,17 @@ fn handle_command(
         PwCommand::DestroyLink { link_id } => {
             link_factory::destroy_link(registry, link_id);
         }
+        PwCommand::DestroyGlobal { id } => {
+            // Remove from ProxyStore first so global_remove callback doesn't double-free
+            let mut store = proxies.borrow_mut();
+            store.nodes.remove(&id);
+            store.links.remove(&id);
+            drop(store);
+            match registry.destroy_global(id).into_result() {
+                Ok(_) => log::info!("Destroyed stale global {}", id),
+                Err(e) => log::warn!("Failed to destroy global {}: {}", id, e),
+            }
+        }
         PwCommand::SetVolume { node_id, volumes } => {
             volume::set_volume(proxies, node_id, &volumes);
         }

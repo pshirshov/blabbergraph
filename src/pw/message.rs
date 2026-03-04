@@ -55,6 +55,9 @@ pub enum PwCommand {
     DestroyLink {
         link_id: u32,
     },
+    DestroyGlobal {
+        id: u32,
+    },
     SetVolume {
         node_id: u32,
         volumes: Vec<f32>,

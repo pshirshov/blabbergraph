@@ -30,7 +30,6 @@ pub fn create_bus(
         "node.description" => name,
         "media.class" => "Audio/Duplex",
         "audio.position" => position,
-        "object.linger" => "true",
         "node.virtual" => "true",
         "monitor.channel-volumes" => "true",
     };
@@ -78,7 +77,6 @@ pub fn create_virtual_input(
         "node.description" => name,
         "media.class" => "Audio/Sink",
         "audio.position" => position,
-        "object.linger" => "true",
         "node.virtual" => "true",
         "monitor.channel-volumes" => "true",
     };

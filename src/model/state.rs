@@ -18,6 +18,8 @@ pub struct AppState {
     pub node_strip_map: HashMap<u32, StripId>,
     /// Whether initial restore has been triggered
     pub restore_pending: bool,
+    /// Whether stale node cleanup has been done
+    pub cleanup_done: bool,
     /// Save debounce source id
     pub save_timeout_id: Option<glib::SourceId>,
 }
@@ -32,6 +34,7 @@ impl AppState {
             node_bus_map: HashMap::new(),
             node_strip_map: HashMap::new(),
             restore_pending: true,
+            cleanup_done: false,
             save_timeout_id: None,
         }
     }

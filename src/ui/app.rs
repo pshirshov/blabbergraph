@@ -267,6 +267,26 @@ fn check_and_restore_routing(
     log::info!("All buses and virtual inputs ready, restoring routing...");
     state.restore_pending = false;
 
+    // Destroy stale blabbergraph nodes from previous runs (lingering nodes)
+    if !state.cleanup_done {
+        state.cleanup_done = true;
+        let stale_ids: Vec<u32> = state
+            .graph
+            .nodes
+            .values()
+            .filter(|n| n.name.starts_with("blabbergraph."))
+            .filter(|n| {
+                !state.bus_node_map.values().any(|&nid| nid == n.id)
+                    && !state.strip_node_map.values().any(|&nid| nid == n.id)
+            })
+            .map(|n| n.id)
+            .collect();
+        for id in stale_ids {
+            log::info!("Destroying stale blabbergraph node {}", id);
+            let _ = pw_sender.send(PwCommand::DestroyGlobal { id });
+        }
+    }
+
     for bus in &state.config.buses {
         if let Some(nid) = state.bus_node_id(bus.id) {
             let _ = pw_sender.send(PwCommand::SetVolume {
