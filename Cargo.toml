@@ -1,0 +1,21 @@
+[package]
+name = "blabbergraph"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pipewire = "0.8"
+libspa = "0.8"
+libspa-sys = "0.8"
+gtk = { version = "0.9", package = "gtk4" }
+adw = { version = "0.7", package = "libadwaita", features = ["v1_4"] }
+glib = "0.20"
+gio = "0.20"
+ksni = "0.2"
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
