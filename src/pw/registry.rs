@@ -13,7 +13,7 @@ use pipewire::spa::sys;
 use pipewire::spa::utils::dict::DictRef;
 use pipewire::types::ObjectType;
 
-use super::message::{BusId, LinkState, PortDirection, PwEvent, StripId};
+use super::message::{BusId, LinkState, PortDirection, PwEvent, StripId, VirtualOutputId};
 
 pub struct BoundNode {
     pub proxy: Node,
@@ -30,6 +30,7 @@ pub struct ProxyStore {
     pub links: HashMap<u32, BoundLink>,
     pub bus_nodes: HashMap<BusId, u32>,
     pub virtual_input_nodes: HashMap<StripId, u32>,
+    pub virtual_output_nodes: HashMap<VirtualOutputId, u32>,
     pub created_nodes: Vec<(Node, NodeListener)>,
     pub created_links: Vec<(Link, LinkListener)>,
 }
@@ -41,6 +42,7 @@ impl ProxyStore {
             links: HashMap::new(),
             bus_nodes: HashMap::new(),
             virtual_input_nodes: HashMap::new(),
+            virtual_output_nodes: HashMap::new(),
             created_nodes: Vec::new(),
             created_links: Vec::new(),
         }
@@ -196,6 +198,8 @@ fn bind_node(
             if let Value::Object(obj) = value {
                 let mut volumes = None;
                 let mut muted = None;
+                let mut soft_volumes = None;
+                let mut monitor_volumes = None;
 
                 for prop in &obj.properties {
                     match prop.key {
@@ -209,15 +213,27 @@ fn bind_node(
                                 muted = Some(m);
                             }
                         }
+                        sys::SPA_PROP_softVolumes => {
+                            if let Value::ValueArray(ValueArray::Float(ref v)) = prop.value {
+                                soft_volumes = Some(v.clone());
+                            }
+                        }
+                        sys::SPA_PROP_monitorVolumes => {
+                            if let Value::ValueArray(ValueArray::Float(ref v)) = prop.value {
+                                monitor_volumes = Some(v.clone());
+                            }
+                        }
                         _ => {}
                     }
                 }
 
-                if volumes.is_some() || muted.is_some() {
+                if volumes.is_some() || muted.is_some() || soft_volumes.is_some() || monitor_volumes.is_some() {
                     let _ = sender.send(PwEvent::ParamsChanged {
                         node_id,
                         volumes,
                         muted,
+                        soft_volumes,
+                        monitor_volumes,
                     });
                 }
             }

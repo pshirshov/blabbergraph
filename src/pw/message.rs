@@ -8,6 +8,9 @@ pub struct BusId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StripId(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct VirtualOutputId(pub u32);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChannelLayout {
     Mono,
@@ -48,6 +51,14 @@ pub enum PwCommand {
     DestroyVirtualInput {
         strip_id: StripId,
     },
+    CreateVirtualOutput {
+        voutput_id: VirtualOutputId,
+        name: String,
+        channels: ChannelLayout,
+    },
+    DestroyVirtualOutput {
+        voutput_id: VirtualOutputId,
+    },
     CreateLink {
         output_port_id: u32,
         input_port_id: u32,
@@ -65,6 +76,10 @@ pub enum PwCommand {
     SetMute {
         node_id: u32,
         muted: bool,
+    },
+    SetMonitoredNodes {
+        /// (node_id, node_name, capture_sink)
+        nodes: Vec<(u32, String, bool)>,
     },
     Terminate,
 }
@@ -107,6 +122,8 @@ pub enum PwEvent {
         node_id: u32,
         volumes: Option<Vec<f32>>,
         muted: Option<bool>,
+        soft_volumes: Option<Vec<f32>>,
+        monitor_volumes: Option<Vec<f32>>,
     },
     BusCreated {
         bus_id: BusId,
@@ -115,5 +132,13 @@ pub enum PwEvent {
     VirtualInputCreated {
         strip_id: StripId,
         node_id: u32,
+    },
+    VirtualOutputCreated {
+        voutput_id: VirtualOutputId,
+        node_id: u32,
+    },
+    PeakLevel {
+        node_id: u32,
+        peaks: Vec<f32>,
     },
 }

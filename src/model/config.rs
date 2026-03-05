@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::bus::BusConfig;
 use super::strip::StripConfig;
-use crate::pw::message::{BusId, ChannelLayout};
+use crate::pw::message::{BusId, ChannelLayout, VirtualOutputId};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -13,6 +13,8 @@ pub struct AppConfig {
     pub strips: Vec<StripConfig>,
     pub next_bus_id: u32,
     pub next_strip_id: u32,
+    #[serde(default)]
+    pub next_voutput_id: u32,
 }
 
 impl AppConfig {
@@ -56,6 +58,7 @@ impl AppConfig {
             strips: Vec::new(),
             next_bus_id: 3,
             next_strip_id: 1,
+            next_voutput_id: 1,
         }
     }
 
@@ -68,6 +71,12 @@ impl AppConfig {
     pub fn allocate_strip_id(&mut self) -> crate::pw::message::StripId {
         let id = crate::pw::message::StripId(self.next_strip_id);
         self.next_strip_id += 1;
+        id
+    }
+
+    pub fn allocate_voutput_id(&mut self) -> VirtualOutputId {
+        let id = VirtualOutputId(self.next_voutput_id);
+        self.next_voutput_id += 1;
         id
     }
 }

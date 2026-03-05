@@ -8,6 +8,7 @@ use pipewire::main_loop::MainLoop;
 use pipewire::registry::Registry;
 
 use super::message::{PwCommand, PwEvent};
+use super::peak_monitor::PeakMonitor;
 use super::registry::ProxyStore;
 use super::{link_factory, node_factory, registry, volume};
 
@@ -18,6 +19,8 @@ pub fn run(pw_receiver: Receiver<PwCommand>, event_tx: mpsc::Sender<PwEvent>) {
     let pw_registry = Rc::new(core.get_registry().expect("Failed to get PipeWire Registry"));
 
     let proxies: Rc<RefCell<ProxyStore>> = Rc::new(RefCell::new(ProxyStore::new()));
+    let peak_monitor: Rc<RefCell<PeakMonitor>> =
+        Rc::new(RefCell::new(PeakMonitor::new(&core, &event_tx)));
 
     let _reg_listener =
         registry::setup_registry_listener(pw_registry.clone(), &event_tx, proxies.clone());
@@ -34,6 +37,7 @@ pub fn run(pw_receiver: Receiver<PwCommand>, event_tx: mpsc::Sender<PwEvent>) {
         let pw_registry = pw_registry.clone();
         let proxies = proxies.clone();
         let event_tx = event_tx.clone();
+        let peak_monitor = peak_monitor.clone();
         move |command| {
             handle_command(
                 &mainloop,
@@ -41,6 +45,7 @@ pub fn run(pw_receiver: Receiver<PwCommand>, event_tx: mpsc::Sender<PwEvent>) {
                 &pw_registry,
                 &proxies,
                 &event_tx,
+                &peak_monitor,
                 command,
             );
         }
@@ -56,6 +61,7 @@ fn handle_command(
     registry: &Registry,
     proxies: &Rc<RefCell<ProxyStore>>,
     event_tx: &mpsc::Sender<PwEvent>,
+    peak_monitor: &Rc<RefCell<PeakMonitor>>,
     command: PwCommand,
 ) {
     match command {
@@ -80,6 +86,18 @@ fn handle_command(
         }
         PwCommand::DestroyVirtualInput { strip_id } => {
             node_factory::destroy_virtual_input(core, proxies, strip_id);
+        }
+        PwCommand::CreateVirtualOutput {
+            voutput_id,
+            name,
+            channels,
+        } => {
+            node_factory::create_virtual_output(
+                core, event_tx, proxies, voutput_id, &name, channels,
+            );
+        }
+        PwCommand::DestroyVirtualOutput { voutput_id } => {
+            node_factory::destroy_virtual_output(core, proxies, voutput_id);
         }
         PwCommand::CreateLink {
             output_port_id,
@@ -106,6 +124,9 @@ fn handle_command(
         }
         PwCommand::SetMute { node_id, muted } => {
             volume::set_mute(proxies, node_id, muted);
+        }
+        PwCommand::SetMonitoredNodes { nodes } => {
+            peak_monitor.borrow_mut().set_monitored_nodes(&nodes);
         }
         PwCommand::Terminate => {
             mainloop.quit();

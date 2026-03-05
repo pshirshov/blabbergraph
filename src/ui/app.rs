@@ -108,6 +108,8 @@ fn process_event(
                 media_class: media_class.clone(),
                 volumes: vec![1.0, 1.0],
                 muted: false,
+                soft_volumes: vec![0.0, 0.0],
+                monitor_volumes: vec![0.0, 0.0],
                 properties: properties.clone(),
             });
             true
@@ -128,6 +130,9 @@ fn process_event(
                 name: name.clone(),
                 direction: *direction,
             });
+            if state.restore_pending {
+                check_and_restore_routing(state, pw_sender);
+            }
             true
         }
         PwEvent::PortRemoved { id } => {
@@ -173,6 +178,8 @@ fn process_event(
             node_id,
             volumes,
             muted,
+            soft_volumes,
+            monitor_volumes,
         } => {
             if let Some(node) = state.graph.nodes.get_mut(node_id) {
                 if let Some(ref v) = volumes {
@@ -181,9 +188,20 @@ fn process_event(
                 if let Some(m) = muted {
                     node.muted = *m;
                 }
+                if let Some(ref sv) = soft_volumes {
+                    node.soft_volumes = sv.clone();
+                }
+                if let Some(ref mv) = monitor_volumes {
+                    node.monitor_volumes = mv.clone();
+                }
             }
             let mixer = mixer_view.borrow();
             mixer.update_node_params(state, *node_id);
+            false
+        }
+        PwEvent::PeakLevel { node_id, ref peaks } => {
+            let mixer = mixer_view.borrow();
+            mixer.update_peak_level(state, *node_id, peaks);
             false
         }
         PwEvent::BusCreated { bus_id, node_id } => {
@@ -197,6 +215,19 @@ fn process_event(
             log::info!(
                 "Virtual input registered: {:?} -> node {}",
                 strip_id,
+                node_id
+            );
+            check_and_restore_routing(state, pw_sender);
+            true
+        }
+        PwEvent::VirtualOutputCreated {
+            voutput_id,
+            node_id,
+        } => {
+            state.register_voutput(*voutput_id, *node_id);
+            log::info!(
+                "Virtual output registered: {:?} -> node {}",
+                voutput_id,
                 node_id
             );
             check_and_restore_routing(state, pw_sender);
@@ -252,19 +283,41 @@ fn check_and_restore_routing(
         .buses
         .iter()
         .all(|b| state.bus_node_map.contains_key(&b.id));
-    let all_vinputs_ready = state.config.strips.iter().all(|s| {
-        if s.is_virtual() {
+    let all_vinputs_ready = state.config.strips.iter().all(|s| match &s.kind {
+        crate::model::strip::StripKind::VirtualInput { .. } => {
             state.strip_node_map.contains_key(&s.id)
-        } else {
-            true
         }
+        crate::model::strip::StripKind::VirtualOutput { voutput_id, .. } => {
+            state.voutput_node_map.contains_key(voutput_id)
+        }
+        _ => true,
     });
 
     if !all_buses_ready || !all_vinputs_ready {
         return;
     }
 
-    log::info!("All buses and virtual inputs ready, restoring routing...");
+    // Verify ports are available for all our created nodes (they arrive after node creation)
+    let all_ports_ready = state.config.buses.iter().all(|b| {
+        state
+            .bus_node_id(b.id)
+            .map_or(false, |nid| !state.graph.ports_for_node(nid).is_empty())
+    }) && state.config.strips.iter().all(|s| match &s.kind {
+        crate::model::strip::StripKind::VirtualInput { .. } => state
+            .strip_node_id(s.id)
+            .map_or(false, |nid| !state.graph.ports_for_node(nid).is_empty()),
+        crate::model::strip::StripKind::VirtualOutput { voutput_id, .. } => state
+            .voutput_node_id(*voutput_id)
+            .map_or(false, |nid| !state.graph.ports_for_node(nid).is_empty()),
+        _ => true,
+    });
+
+    if !all_ports_ready {
+        log::debug!("Nodes registered but ports not yet available, deferring restore");
+        return;
+    }
+
+    log::info!("All buses, virtual inputs, and virtual outputs ready, restoring routing...");
     state.restore_pending = false;
 
     // Destroy stale blabbergraph nodes from previous runs (lingering nodes)
@@ -278,6 +331,7 @@ fn check_and_restore_routing(
             .filter(|n| {
                 !state.bus_node_map.values().any(|&nid| nid == n.id)
                     && !state.strip_node_map.values().any(|&nid| nid == n.id)
+                    && !state.voutput_node_map.values().any(|&nid| nid == n.id)
             })
             .map(|n| n.id)
             .collect();
@@ -301,14 +355,15 @@ fn check_and_restore_routing(
     }
 
     for strip in state.config.strips.clone() {
-        let node_id = if strip.is_virtual() {
-            state.strip_node_id(strip.id)
-        } else {
-            match &strip.kind {
-                crate::model::strip::StripKind::HardwareInput { node_name } => {
-                    state.find_hardware_node_by_name(node_name)
-                }
-                _ => None,
+        let node_id = match &strip.kind {
+            crate::model::strip::StripKind::HardwareInput { node_name } => {
+                state.find_hardware_node_by_name(node_name)
+            }
+            crate::model::strip::StripKind::VirtualInput { .. } => {
+                state.strip_node_id(strip.id)
+            }
+            crate::model::strip::StripKind::VirtualOutput { voutput_id, .. } => {
+                state.voutput_node_id(*voutput_id)
             }
         };
 

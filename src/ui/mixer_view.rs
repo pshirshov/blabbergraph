@@ -8,23 +8,17 @@ use gtk::{self, Orientation, ScrolledWindow};
 use crate::model::bus::BusConfig;
 use crate::model::routing;
 use crate::model::state::AppState;
-use crate::model::strip::StripConfig;
-use crate::pw::message::{BusId, ChannelLayout, PwCommand, StripId};
+use crate::model::strip::{StripConfig, StripKind};
+use crate::pw::message::{ChannelLayout, PwCommand, StripId};
 
-use super::bus_widget::BusWidget;
-use super::output_widget::OutputWidget;
-use super::strip_widget::StripWidget;
+use super::channel_strip::{ChannelStrip, StripRole};
 
 pub struct MixerView {
     pub container: gtk::Box,
-    pub strips_box: gtk::Box,
-    pub buses_box: gtk::Box,
-    pub outputs_box: gtk::Box,
-    pub strip_widgets: Vec<StripWidget>,
-    pub bus_widgets: Vec<BusWidget>,
-    pub output_widgets: Vec<OutputWidget>,
-    pub add_strip_button: gtk::Button,
-    pub add_bus_button: gtk::Button,
+    inputs_box: gtk::Box,
+    buses_box: gtk::Box,
+    outputs_box: gtk::Box,
+    pub strips: Vec<ChannelStrip>,
 }
 
 impl MixerView {
@@ -32,96 +26,70 @@ impl MixerView {
         pw_sender: &pipewire::channel::Sender<PwCommand>,
         state: &Rc<RefCell<AppState>>,
     ) -> Self {
-        let container = gtk::Box::new(Orientation::Horizontal, 0);
+        let container = gtk::Box::new(Orientation::Vertical, 0);
         container.set_vexpand(true);
         container.set_hexpand(true);
 
-        // Left: Input Strips
-        let strips_frame = gtk::Frame::new(Some("Input Strips"));
-        strips_frame.set_hexpand(true);
-        let strips_scroll = ScrolledWindow::new();
-        strips_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
-        strips_scroll.set_vexpand(true);
-        let strips_box = gtk::Box::new(Orientation::Horizontal, 0);
-        strips_box.set_vexpand(true);
-        strips_scroll.set_child(Some(&strips_box));
+        // Toolbar with Add buttons
+        let toolbar = gtk::Box::new(Orientation::Horizontal, 8);
+        toolbar.set_margin_start(8);
+        toolbar.set_margin_end(8);
+        toolbar.set_margin_top(4);
+        toolbar.set_margin_bottom(4);
 
-        let strips_outer = gtk::Box::new(Orientation::Vertical, 4);
-        strips_outer.set_hexpand(true);
-        strips_outer.set_margin_start(4);
-        strips_outer.set_margin_end(4);
-        strips_outer.append(&strips_scroll);
+        let add_input_btn = gtk::Button::with_label("+ Virtual Input");
+        let add_bus_btn = gtk::Button::with_label("+ Bus");
+        let add_voutput_btn = gtk::Button::with_label("+ Virtual Output");
+        toolbar.append(&add_input_btn);
+        toolbar.append(&add_bus_btn);
+        toolbar.append(&add_voutput_btn);
+        container.append(&toolbar);
 
-        let add_strip_button = gtk::Button::with_label("+ Add Virtual Input");
-        add_strip_button.set_halign(gtk::Align::Start);
-        add_strip_button.set_margin_start(8);
-        add_strip_button.set_margin_bottom(8);
-        strips_outer.append(&add_strip_button);
+        container.append(&gtk::Separator::new(Orientation::Horizontal));
 
-        strips_frame.set_child(Some(&strips_outer));
-        container.append(&strips_frame);
+        // Scrollable area with 3 expander sections
+        let scroll = ScrolledWindow::new();
+        scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+        scroll.set_vexpand(true);
 
-        container.append(&gtk::Separator::new(Orientation::Vertical));
+        let content = gtk::Box::new(Orientation::Vertical, 0);
+        content.set_margin_start(4);
+        content.set_margin_end(4);
 
-        // Center: Buses
-        let buses_frame = gtk::Frame::new(Some("Buses"));
-        buses_frame.set_hexpand(true);
-        let buses_scroll = ScrolledWindow::new();
-        buses_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
-        buses_scroll.set_vexpand(true);
-        let buses_box = gtk::Box::new(Orientation::Horizontal, 0);
-        buses_box.set_vexpand(true);
-        buses_scroll.set_child(Some(&buses_box));
+        // Inputs section
+        let inputs_expander = gtk::Expander::new(Some("Inputs"));
+        inputs_expander.set_expanded(true);
+        let inputs_box = gtk::Box::new(Orientation::Vertical, 0);
+        inputs_expander.set_child(Some(&inputs_box));
+        content.append(&inputs_expander);
 
-        let buses_outer = gtk::Box::new(Orientation::Vertical, 4);
-        buses_outer.set_hexpand(true);
-        buses_outer.set_margin_start(4);
-        buses_outer.set_margin_end(4);
-        buses_outer.append(&buses_scroll);
+        // Buses section
+        let buses_expander = gtk::Expander::new(Some("Buses"));
+        buses_expander.set_expanded(true);
+        let buses_box = gtk::Box::new(Orientation::Vertical, 0);
+        buses_expander.set_child(Some(&buses_box));
+        content.append(&buses_expander);
 
-        let add_bus_button = gtk::Button::with_label("+ Add Bus");
-        add_bus_button.set_halign(gtk::Align::Start);
-        add_bus_button.set_margin_start(8);
-        add_bus_button.set_margin_bottom(8);
-        buses_outer.append(&add_bus_button);
+        // Outputs section
+        let outputs_expander = gtk::Expander::new(Some("Outputs"));
+        outputs_expander.set_expanded(true);
+        let outputs_box = gtk::Box::new(Orientation::Vertical, 0);
+        outputs_expander.set_child(Some(&outputs_box));
+        content.append(&outputs_expander);
 
-        buses_frame.set_child(Some(&buses_outer));
-        container.append(&buses_frame);
+        scroll.set_child(Some(&content));
+        container.append(&scroll);
 
-        container.append(&gtk::Separator::new(Orientation::Vertical));
-
-        // Right: Output Strips
-        let outputs_frame = gtk::Frame::new(Some("Outputs"));
-        outputs_frame.set_hexpand(true);
-        let outputs_scroll = ScrolledWindow::new();
-        outputs_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
-        outputs_scroll.set_vexpand(true);
-        let outputs_box = gtk::Box::new(Orientation::Horizontal, 0);
-        outputs_box.set_vexpand(true);
-        outputs_scroll.set_child(Some(&outputs_box));
-
-        let outputs_outer = gtk::Box::new(Orientation::Vertical, 4);
-        outputs_outer.set_hexpand(true);
-        outputs_outer.set_margin_start(4);
-        outputs_outer.set_margin_end(4);
-        outputs_outer.append(&outputs_scroll);
-
-        outputs_frame.set_child(Some(&outputs_outer));
-        container.append(&outputs_frame);
-
-        // "Add Virtual Input" button handler
+        // "Add Virtual Input" handler
         {
             let sender = pw_sender.clone();
             let state_ref = state.clone();
-            add_strip_button.connect_clicked(move |_| {
+            add_input_btn.connect_clicked(move |_| {
                 let mut state = state_ref.borrow_mut();
                 let strip_id = state.config.allocate_strip_id();
                 let name = format!("VInput {}", strip_id.0);
-                let strip = StripConfig::new_virtual(
-                    strip_id,
-                    name.clone(),
-                    ChannelLayout::Stereo,
-                );
+                let strip =
+                    StripConfig::new_virtual(strip_id, name.clone(), ChannelLayout::Stereo);
                 state.config.strips.push(strip);
                 let _ = sender.send(PwCommand::CreateVirtualInput {
                     strip_id,
@@ -131,11 +99,11 @@ impl MixerView {
             });
         }
 
-        // "Add Bus" button handler
+        // "Add Bus" handler
         {
             let sender = pw_sender.clone();
             let state_ref = state.clone();
-            add_bus_button.connect_clicked(move |_| {
+            add_bus_btn.connect_clicked(move |_| {
                 let mut state = state_ref.borrow_mut();
                 let bus_id = state.config.allocate_bus_id();
                 let name = format!("Bus {}", bus_id.0);
@@ -149,16 +117,36 @@ impl MixerView {
             });
         }
 
+        // "Add Virtual Output" handler
+        {
+            let sender = pw_sender.clone();
+            let state_ref = state.clone();
+            add_voutput_btn.connect_clicked(move |_| {
+                let mut state = state_ref.borrow_mut();
+                let voutput_id = state.config.allocate_voutput_id();
+                let strip_id = state.config.allocate_strip_id();
+                let name = format!("VOutput {}", voutput_id.0);
+                let strip = StripConfig::new_virtual_output(
+                    strip_id,
+                    voutput_id,
+                    name.clone(),
+                    ChannelLayout::Stereo,
+                );
+                state.config.strips.push(strip);
+                let _ = sender.send(PwCommand::CreateVirtualOutput {
+                    voutput_id,
+                    name,
+                    channels: ChannelLayout::Stereo,
+                });
+            });
+        }
+
         Self {
             container,
-            strips_box,
+            inputs_box,
             buses_box,
             outputs_box,
-            strip_widgets: Vec::new(),
-            bus_widgets: Vec::new(),
-            output_widgets: Vec::new(),
-            add_strip_button,
-            add_bus_button,
+            strips: Vec::new(),
         }
     }
 
@@ -167,9 +155,9 @@ impl MixerView {
         pw_sender: &pipewire::channel::Sender<PwCommand>,
         state: &Rc<RefCell<AppState>>,
     ) {
-        // Clear existing widgets
-        while let Some(child) = self.strips_box.first_child() {
-            self.strips_box.remove(&child);
+        // Clear all
+        while let Some(child) = self.inputs_box.first_child() {
+            self.inputs_box.remove(&child);
         }
         while let Some(child) = self.buses_box.first_child() {
             self.buses_box.remove(&child);
@@ -177,21 +165,20 @@ impl MixerView {
         while let Some(child) = self.outputs_box.first_child() {
             self.outputs_box.remove(&child);
         }
-        self.strip_widgets.clear();
-        self.bus_widgets.clear();
-        self.output_widgets.clear();
+        self.strips.clear();
 
         let state_borrow = state.borrow();
 
-        let bus_names: Vec<(BusId, String)> = state_borrow
+        // Bus names as route targets for input strips: key = BusId as string
+        let bus_route_targets: Vec<(String, String)> = state_borrow
             .config
             .buses
             .iter()
-            .map(|b| (b.id, b.name.clone()))
+            .map(|b| (b.id.0.to_string(), b.name.clone()))
             .collect();
 
-        // Collect hardware outputs (sinks not managed by us)
-        let mut output_names: Vec<(String, String)> = state_borrow
+        // Hardware output names as route targets for bus strips: key = node_name
+        let mut output_route_targets: Vec<(String, String)> = state_borrow
             .graph
             .audio_sink_nodes()
             .into_iter()
@@ -205,46 +192,67 @@ impl MixerView {
                 (n.name.clone(), display)
             })
             .collect();
-        output_names.sort_by(|a, b| a.1.cmp(&b.1));
+        output_route_targets.sort_by(|a, b| a.1.cmp(&b.1));
 
-        // Create strip widgets
+        // --- Inputs section ---
+        // Configured strips (non-voutput)
         for strip in &state_borrow.config.strips {
-            let name = match &strip.kind {
-                crate::model::strip::StripKind::HardwareInput { node_name } => {
-                    state_borrow
-                        .find_hardware_node_by_name(node_name)
-                        .and_then(|nid| state_borrow.graph.nodes.get(&nid))
-                        .map(|n| n.description.clone())
-                        .unwrap_or_else(|| node_name.clone())
-                }
-                crate::model::strip::StripKind::VirtualInput { name } => name.clone(),
-            };
-
-            let widget = StripWidget::new(strip.id, &name, &bus_names, pw_sender, state);
-            widget.volume_scale.set_value(
-                strip.volume.first().copied().unwrap_or(1.0) as f64 * 100.0,
-            );
-            widget.mute_button.set_active(strip.muted);
-
-            for (bus_id, btn) in &widget.route_buttons {
-                btn.set_active(strip.routed_to.contains(bus_id));
+            if strip.is_virtual_output() {
+                continue;
             }
 
-            self.strips_box.append(&widget.container);
-            self.strip_widgets.push(widget);
+            let name = match &strip.kind {
+                StripKind::HardwareInput { node_name } => state_borrow
+                    .find_hardware_node_by_name(node_name)
+                    .and_then(|nid| state_borrow.graph.nodes.get(&nid))
+                    .map(|n| n.description.clone())
+                    .unwrap_or_else(|| node_name.clone()),
+                StripKind::VirtualInput { name } => name.clone(),
+                StripKind::VirtualOutput { .. } => unreachable!(),
+            };
+
+            let source_nid = match &strip.kind {
+                StripKind::HardwareInput { node_name } => {
+                    state_borrow.find_hardware_node_by_name(node_name)
+                }
+                StripKind::VirtualInput { .. } => state_borrow.strip_node_id(strip.id),
+                StripKind::VirtualOutput { .. } => unreachable!(),
+            };
+
+            let active_routes = compute_active_input_routes(
+                &state_borrow,
+                source_nid,
+                &bus_route_targets,
+            );
+            let is_deletable = strip.is_virtual();
+
+            let is_renamable = strip.is_virtual();
+            let widget = ChannelStrip::new(
+                StripRole::Input {
+                    strip_id: strip.id,
+                },
+                &name,
+                &bus_route_targets,
+                &active_routes,
+                is_deletable,
+                is_renamable,
+                None,
+                pw_sender,
+                state,
+            );
+            let vol = strip.volume.first().copied().unwrap_or(1.0);
+            widget.volume_scale.set_value(vol as f64 * 100.0);
+            widget.update_mute(strip.muted);
+
+            self.inputs_box.append(&widget.container);
+            self.strips.push(widget);
         }
 
-        // Also show hardware source nodes not in config as discoverable strips
+        // Discoverable hardware sources not in config
         for node in state_borrow.graph.nodes.values() {
             if node.media_class == "Audio/Source" || node.media_class == "Audio/Source/Virtual" {
                 let already_configured = state_borrow.config.strips.iter().any(|s| {
-                    if let crate::model::strip::StripKind::HardwareInput { ref node_name } =
-                        s.kind
-                    {
-                        node_name == &node.name
-                    } else {
-                        false
-                    }
+                    matches!(&s.kind, StripKind::HardwareInput { node_name } if node_name == &node.name)
                 });
                 if !already_configured && !node.name.starts_with("blabbergraph.") {
                     let display_name = if node.description.is_empty() {
@@ -252,24 +260,45 @@ impl MixerView {
                     } else {
                         &node.description
                     };
-                    let widget = StripWidget::new(
-                        StripId(10000 + node.id),
+                    let active_routes = compute_active_input_routes(
+                        &state_borrow,
+                        Some(node.id),
+                        &bus_route_targets,
+                    );
+                    let widget = ChannelStrip::new(
+                        StripRole::Input {
+                            strip_id: StripId(10000 + node.id),
+                        },
                         display_name,
-                        &bus_names,
+                        &bus_route_targets,
+                        &active_routes,
+                        false,
+                        false,
+                        Some(node.id),
                         pw_sender,
                         state,
                     );
-                    self.strips_box.append(&widget.container);
-                    self.strip_widgets.push(widget);
+                    self.inputs_box.append(&widget.container);
+                    self.strips.push(widget);
                 }
             }
         }
 
-        // Create bus widgets with output route toggles
+        // --- Buses section ---
         for bus in &state_borrow.config.buses {
+            // Build per-bus route targets: hw outputs + other buses (excluding self)
+            let mut bus_route_targets_for_bus = output_route_targets.clone();
+            for other_bus in &state_borrow.config.buses {
+                if other_bus.id == bus.id {
+                    continue;
+                }
+                let node_name = format!("blabbergraph.bus.{}", other_bus.name);
+                bus_route_targets_for_bus.push((node_name, format!("[Bus] {}", other_bus.name)));
+            }
+
             let active_outputs: HashSet<String> =
                 if let Some(bus_nid) = state_borrow.bus_node_id(bus.id) {
-                    output_names
+                    bus_route_targets_for_bus
                         .iter()
                         .filter(|(node_name, _)| {
                             if let Some(out_nid) =
@@ -287,71 +316,198 @@ impl MixerView {
                     bus.output_targets.clone()
                 };
 
-            let widget = BusWidget::new(
-                bus.id,
+            let widget = ChannelStrip::new(
+                StripRole::Bus { bus_id: bus.id },
                 &bus.name,
-                &output_names,
+                &bus_route_targets_for_bus,
                 &active_outputs,
+                true,
+                true,
+                None,
                 pw_sender,
                 state,
             );
-            widget
-                .volume_scale
-                .set_value(bus.volume.first().copied().unwrap_or(1.0) as f64 * 100.0);
-            widget.mute_button.set_active(bus.muted);
+            let vol = bus.volume.first().copied().unwrap_or(1.0);
+            widget.volume_scale.set_value(vol as f64 * 100.0);
+            widget.update_mute(bus.muted);
 
             self.buses_box.append(&widget.container);
-            self.bus_widgets.push(widget);
+            self.strips.push(widget);
         }
 
-        // Create output widgets for hardware sinks
-        for (node_name, display_name) in &output_names {
+        // --- Outputs section ---
+        // Hardware outputs
+        for (node_name, display_name) in &output_route_targets {
             if let Some(node) = state_borrow
                 .graph
                 .nodes
                 .values()
                 .find(|n| &n.name == node_name)
             {
-                let widget = OutputWidget::new(node_name, display_name, node.id, pw_sender);
+                let widget = ChannelStrip::new(
+                    StripRole::HardwareOutput {
+                        node_name: node_name.clone(),
+                    },
+                    display_name,
+                    &[],
+                    &HashSet::new(),
+                    false,
+                    false,
+                    None,
+                    pw_sender,
+                    state,
+                );
                 widget.update_volume(&node.volumes);
                 widget.update_mute(node.muted);
                 self.outputs_box.append(&widget.container);
-                self.output_widgets.push(widget);
+                self.strips.push(widget);
+            }
+        }
+
+        // Virtual outputs
+        for strip in &state_borrow.config.strips {
+            if let StripKind::VirtualOutput {
+                voutput_id, name, ..
+            } = &strip.kind
+            {
+                let widget = ChannelStrip::new(
+                    StripRole::VirtualOutput {
+                        voutput_id: *voutput_id,
+                    },
+                    name,
+                    &[],
+                    &HashSet::new(),
+                    true,
+                    true,
+                    None,
+                    pw_sender,
+                    state,
+                );
+                let vol = strip.volume.first().copied().unwrap_or(1.0);
+                widget.volume_scale.set_value(vol as f64 * 100.0);
+                widget.update_mute(strip.muted);
+                self.outputs_box.append(&widget.container);
+                self.strips.push(widget);
+            }
+        }
+
+        // Collect all PW (node_id, node_name, capture_sink) tuples for peak monitoring
+        let mut monitored_nodes: Vec<(u32, String, bool)> = Vec::new();
+        for strip in &self.strips {
+            let node_id = match &strip.role {
+                StripRole::Input { strip_id } => state_borrow
+                    .strip_node_id(*strip_id)
+                    .or_else(|| {
+                        let s = state_borrow.config.strips.iter().find(|s| s.id == *strip_id)?;
+                        match &s.kind {
+                            StripKind::HardwareInput { node_name } => {
+                                state_borrow.find_hardware_node_by_name(node_name)
+                            }
+                            _ => None,
+                        }
+                    })
+                    .or(strip.pre_resolved_node_id),
+                StripRole::Bus { bus_id } => state_borrow.bus_node_id(*bus_id),
+                StripRole::HardwareOutput { node_name } => {
+                    state_borrow.find_hardware_node_by_name(node_name)
+                }
+                StripRole::VirtualOutput { voutput_id } => {
+                    state_borrow.voutput_node_id(*voutput_id)
+                }
+            };
+            if let Some(nid) = node_id {
+                if let Some(node) = state_borrow.graph.nodes.get(&nid) {
+                    // Sources produce audio on output ports — capture directly.
+                    // Sinks/duplex need STREAM_CAPTURE_SINK to tap monitor ports.
+                    let capture_sink = node.media_class == "Audio/Sink"
+                        || node.media_class == "Audio/Duplex";
+                    monitored_nodes.push((nid, node.name.clone(), capture_sink));
+                }
             }
         }
 
         drop(state_borrow);
+
+        let _ = pw_sender.send(PwCommand::SetMonitoredNodes {
+            nodes: monitored_nodes,
+        });
+    }
+
+    pub fn update_peak_level(&self, state: &AppState, node_id: u32, peaks: &[f32]) {
+        for strip in &self.strips {
+            let matches = match &strip.role {
+                StripRole::Input { strip_id } => {
+                    state.node_strip_map.get(&node_id) == Some(strip_id)
+                        || strip.pre_resolved_node_id == Some(node_id)
+                }
+                StripRole::Bus { bus_id } => state.node_bus_map.get(&node_id) == Some(bus_id),
+                StripRole::HardwareOutput { node_name } => {
+                    state
+                        .graph
+                        .nodes
+                        .get(&node_id)
+                        .map_or(false, |n| &n.name == node_name)
+                }
+                StripRole::VirtualOutput { voutput_id } => {
+                    state.node_voutput_map.get(&node_id) == Some(voutput_id)
+                }
+            };
+
+            if matches {
+                strip.update_level(peaks);
+            }
+        }
     }
 
     pub fn update_node_params(&self, state: &AppState, node_id: u32) {
-        if let Some(&bus_id) = state.node_bus_map.get(&node_id) {
-            if let Some(node) = state.graph.nodes.get(&node_id) {
-                for bw in &self.bus_widgets {
-                    if bw.bus_id == bus_id {
-                        bw.update_volume(&node.volumes);
-                        bw.update_mute(node.muted);
-                    }
+        let node = match state.graph.nodes.get(&node_id) {
+            Some(n) => n,
+            None => return,
+        };
+
+        for strip in &self.strips {
+            let matches = match &strip.role {
+                StripRole::Input { strip_id } => {
+                    state.node_strip_map.get(&node_id) == Some(strip_id)
                 }
-            }
-        }
-        if let Some(&strip_id) = state.node_strip_map.get(&node_id) {
-            if let Some(node) = state.graph.nodes.get(&node_id) {
-                for sw in &self.strip_widgets {
-                    if sw.strip_id == strip_id {
-                        sw.update_volume(&node.volumes);
-                        sw.update_mute(node.muted);
-                    }
+                StripRole::Bus { bus_id } => state.node_bus_map.get(&node_id) == Some(bus_id),
+                StripRole::HardwareOutput { node_name } => &node.name == node_name,
+                StripRole::VirtualOutput { voutput_id } => {
+                    state.node_voutput_map.get(&node_id) == Some(voutput_id)
                 }
-            }
-        }
-        // Update output widgets (hardware sinks)
-        if let Some(node) = state.graph.nodes.get(&node_id) {
-            for ow in &self.output_widgets {
-                if ow.node_name == node.name {
-                    ow.update_volume(&node.volumes);
-                    ow.update_mute(node.muted);
-                }
+            };
+
+            if matches {
+                strip.update_volume(&node.volumes);
+                strip.update_mute(node.muted);
             }
         }
     }
+}
+
+/// Derive active input routes from actual PW graph links rather than config state.
+/// For each bus route target, check if links exist from `source_nid` to the bus node.
+fn compute_active_input_routes(
+    state: &AppState,
+    source_nid: Option<u32>,
+    bus_route_targets: &[(String, String)],
+) -> HashSet<String> {
+    let Some(src) = source_nid else {
+        return HashSet::new();
+    };
+    bus_route_targets
+        .iter()
+        .filter(|(bus_id_str, _)| {
+            let bus_id = match bus_id_str.parse::<u32>() {
+                Ok(v) => crate::pw::message::BusId(v),
+                Err(_) => return false,
+            };
+            if let Some(bus_nid) = state.bus_node_id(bus_id) {
+                !routing::find_links_between(&state.graph, src, bus_nid).is_empty()
+            } else {
+                false
+            }
+        })
+        .map(|(key, _)| key.clone())
+        .collect()
 }

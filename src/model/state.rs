@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::pw::graph::PwGraph;
-use crate::pw::message::{BusId, StripId};
+use crate::pw::message::{BusId, StripId, VirtualOutputId};
 
 use super::config::AppConfig;
 
@@ -16,6 +16,10 @@ pub struct AppState {
     pub node_bus_map: HashMap<u32, BusId>,
     /// Reverse: PW node id -> StripId
     pub node_strip_map: HashMap<u32, StripId>,
+    /// Maps our logical VirtualOutputId to PipeWire node id
+    pub voutput_node_map: HashMap<VirtualOutputId, u32>,
+    /// Reverse: PW node id -> VirtualOutputId
+    pub node_voutput_map: HashMap<u32, VirtualOutputId>,
     /// Whether initial restore has been triggered
     pub restore_pending: bool,
     /// Whether stale node cleanup has been done
@@ -33,6 +37,8 @@ impl AppState {
             strip_node_map: HashMap::new(),
             node_bus_map: HashMap::new(),
             node_strip_map: HashMap::new(),
+            voutput_node_map: HashMap::new(),
+            node_voutput_map: HashMap::new(),
             restore_pending: true,
             cleanup_done: false,
             save_timeout_id: None,
@@ -55,6 +61,15 @@ impl AppState {
 
     pub fn strip_node_id(&self, strip_id: StripId) -> Option<u32> {
         self.strip_node_map.get(&strip_id).copied()
+    }
+
+    pub fn register_voutput(&mut self, voutput_id: VirtualOutputId, node_id: u32) {
+        self.voutput_node_map.insert(voutput_id, node_id);
+        self.node_voutput_map.insert(node_id, voutput_id);
+    }
+
+    pub fn voutput_node_id(&self, voutput_id: VirtualOutputId) -> Option<u32> {
+        self.voutput_node_map.get(&voutput_id).copied()
     }
 
     pub fn find_hardware_node_by_name(&self, node_name: &str) -> Option<u32> {

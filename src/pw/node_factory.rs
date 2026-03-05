@@ -6,7 +6,7 @@ use pipewire::core::Core;
 use pipewire::node::Node;
 use pipewire::properties::properties;
 
-use super::message::{BusId, ChannelLayout, PwEvent, StripId};
+use super::message::{BusId, ChannelLayout, PwEvent, StripId, VirtualOutputId};
 use super::registry::ProxyStore;
 
 pub fn create_bus(
@@ -122,6 +122,73 @@ pub fn destroy_bus(core: &Core, proxies: &Rc<RefCell<ProxyStore>>, bus_id: BusId
 pub fn destroy_virtual_input(core: &Core, proxies: &Rc<RefCell<ProxyStore>>, strip_id: StripId) {
     let mut store = proxies.borrow_mut();
     if let Some(node_id) = store.virtual_input_nodes.remove(&strip_id) {
+        if let Some(bound) = store.nodes.remove(&node_id) {
+            let _ = core.destroy_object(bound.proxy);
+        }
+    }
+}
+
+pub fn create_virtual_output(
+    core: &Core,
+    event_tx: &mpsc::Sender<PwEvent>,
+    proxies: &Rc<RefCell<ProxyStore>>,
+    voutput_id: VirtualOutputId,
+    name: &str,
+    channels: ChannelLayout,
+) {
+    let position = match channels {
+        ChannelLayout::Mono => "MONO",
+        ChannelLayout::Stereo => "FL,FR",
+    };
+
+    let pw_name = format!("blabbergraph.voutput.{}", name);
+
+    let props = properties! {
+        "factory.name" => "support.null-audio-sink",
+        "node.name" => pw_name.as_str(),
+        "node.description" => name,
+        "media.class" => "Audio/Source/Virtual",
+        "audio.position" => position,
+        "node.virtual" => "true",
+        "monitor.channel-volumes" => "true",
+    };
+
+    match core.create_object::<Node>("adapter", &props) {
+        Ok(node) => {
+            let sender = event_tx.clone();
+            let proxies_clone = proxies.clone();
+            let listener = node
+                .add_listener_local()
+                .info(move |info| {
+                    let node_id = info.id();
+                    log::info!(
+                        "Virtual output created: voutput_id={:?} node_id={}",
+                        voutput_id,
+                        node_id
+                    );
+                    proxies_clone
+                        .borrow_mut()
+                        .virtual_output_nodes
+                        .insert(voutput_id, node_id);
+                    let _ = sender.send(PwEvent::VirtualOutputCreated { voutput_id, node_id });
+                })
+                .register();
+
+            proxies.borrow_mut().created_nodes.push((node, listener));
+        }
+        Err(e) => {
+            log::error!("Failed to create virtual output {:?}: {}", voutput_id, e);
+        }
+    }
+}
+
+pub fn destroy_virtual_output(
+    core: &Core,
+    proxies: &Rc<RefCell<ProxyStore>>,
+    voutput_id: VirtualOutputId,
+) {
+    let mut store = proxies.borrow_mut();
+    if let Some(node_id) = store.virtual_output_nodes.remove(&voutput_id) {
         if let Some(bound) = store.nodes.remove(&node_id) {
             let _ = core.destroy_object(bound.proxy);
         }

@@ -70,12 +70,25 @@ fn main() {
                 });
             }
             for strip in &state_borrow.config.strips {
-                if let StripKind::VirtualInput { ref name } = strip.kind {
-                    let _ = pw_sender_activate.send(PwCommand::CreateVirtualInput {
-                        strip_id: strip.id,
-                        name: name.clone(),
-                        channels: strip.channels,
-                    });
+                match &strip.kind {
+                    StripKind::VirtualInput { ref name } => {
+                        let _ = pw_sender_activate.send(PwCommand::CreateVirtualInput {
+                            strip_id: strip.id,
+                            name: name.clone(),
+                            channels: strip.channels,
+                        });
+                    }
+                    StripKind::VirtualOutput {
+                        voutput_id,
+                        ref name,
+                    } => {
+                        let _ = pw_sender_activate.send(PwCommand::CreateVirtualOutput {
+                            voutput_id: *voutput_id,
+                            name: name.clone(),
+                            channels: strip.channels,
+                        });
+                    }
+                    StripKind::HardwareInput { .. } => {}
                 }
             }
         }

@@ -11,6 +11,13 @@ pub fn compute_link_pairs(
     let dest_inputs = graph.input_ports_for_node(dest_node_id);
 
     if source_outputs.is_empty() || dest_inputs.is_empty() {
+        log::debug!(
+            "compute_link_pairs({} -> {}): no ports (src_out={}, dst_in={})",
+            source_node_id,
+            dest_node_id,
+            source_outputs.len(),
+            dest_inputs.len()
+        );
         return Vec::new();
     }
 

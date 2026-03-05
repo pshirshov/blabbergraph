@@ -10,6 +10,8 @@ pub struct NodeInfo {
     pub media_class: String,
     pub volumes: Vec<f32>,
     pub muted: bool,
+    pub soft_volumes: Vec<f32>,
+    pub monitor_volumes: Vec<f32>,
     pub properties: HashMap<String, String>,
 }
 
